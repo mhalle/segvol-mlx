@@ -33,4 +33,7 @@ dev = [
     "torch>=2.11.0",
     "pytest>=9.0.0",
     "monai>=1.4.0",
+    "einops>=0.8.2",
+    "transformers>=5.5.0",
+    "torchvision>=0.26.0",
 ]

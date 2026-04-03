@@ -118,6 +118,24 @@ class TextEncoder(nn.Module):
 
 # --- Precomputed embeddings for known organs ---
 
+def load_tokenizer():
+    """Load the CLIP tokenizer from HuggingFace SegVol repo."""
+    from huggingface_hub import hf_hub_download
+    from tokenizers import Tokenizer
+
+    tok_path = hf_hub_download("BAAI/SegVol", "tokenizer.json")
+    tokenizer = Tokenizer.from_file(tok_path)
+    tokenizer.enable_padding(length=77, pad_id=49407)
+    tokenizer.enable_truncation(max_length=77)
+    return tokenizer
+
+
+def tokenize_text(tokenizer, text: str) -> mx.array:
+    """Tokenize a text prompt for CLIP. Returns (1, 77) token IDs."""
+    encoded = tokenizer.encode(text)
+    return mx.array([encoded.ids])
+
+
 SEGVOL_TEXT_TEMPLATE = "A computerized tomography of a {}."
 
 # These organ names match SegVol's training data

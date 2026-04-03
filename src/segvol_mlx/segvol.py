@@ -88,3 +88,32 @@ class SegVol(nn.Module):
             text_embedding=text_embedding)
 
         return masks, iou_pred
+
+    def segment_by_text(
+        self,
+        image: mx.array,
+        organ_name: str,
+        tokenizer=None,
+    ) -> mx.array:
+        """Segment an organ using a text prompt.
+
+        Args:
+            image: (B, D, H, W, 1) preprocessed CT, channels-last
+            organ_name: e.g. "liver", "spleen", "left lung upper lobe"
+            tokenizer: CLIP tokenizer (load via text_encoder.load_tokenizer())
+
+        Returns:
+            mask: (B, 1, D', H', W') segmentation logits (threshold at 0)
+        """
+        from .text_encoder import SEGVOL_TEXT_TEMPLATE, tokenize_text
+
+        if tokenizer is None:
+            from .text_encoder import load_tokenizer
+            tokenizer = load_tokenizer()
+
+        text = SEGVOL_TEXT_TEMPLATE.format(organ_name)
+        input_ids = tokenize_text(tokenizer, text)
+        text_emb = self.text_encoder(input_ids)
+
+        masks, _ = self(image, text_embedding=text_emb, multimask_output=False)
+        return masks
