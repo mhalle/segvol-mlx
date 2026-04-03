@@ -214,6 +214,128 @@ def segment_slab(
     return mask, (d_start, d_end)
 
 
+def sliding_window_segment(
+    model,
+    volume: np.ndarray,
+    organ_name: str,
+    point_dhw: Optional[Tuple[int, int, int]] = None,
+    bbox: Optional[Tuple[int, int, int, int, int, int]] = None,
+    spatial_size: Tuple[int, int, int] = (32, 256, 256),
+    overlap: float = 0.5,
+    verbose: bool = True,
+) -> np.ndarray:
+    """Full-volume segmentation via sliding window with point prompts.
+
+    Uses overlapping 32-slice slabs with a point prompt projected into each slab.
+    Point-prompted slabs produce much better results than text-only.
+
+    For best results, provide either:
+    - point_dhw: a click location (from user interaction or TotalSegmentator centroid)
+    - bbox: a bounding box (d1,h1,w1,d2,h2,w2) to constrain the search
+
+    Args:
+        model: Loaded SegVol model
+        volume: Raw CT (D, H, W) in HU
+        organ_name: Used for text embedding (combined with point for best results)
+        point_dhw: Click location in voxel coordinates
+        bbox: Bounding box to constrain slabs (d1,h1,w1,d2,h2,w2)
+        spatial_size: Model input size (32, 256, 256)
+        overlap: Slab overlap fraction
+        verbose: Print progress
+
+    Returns:
+        Binary mask (D, H, W)
+    """
+    from .text_encoder import get_organ_embedding
+    from scipy.ndimage import gaussian_filter
+
+    D, H, W = volume.shape
+    v_min, v_max = volume.min(), volume.max()
+    vol_norm = (volume.astype(np.float32) - v_min) / (v_max - v_min + 1e-8)
+
+    slab_depth = spatial_size[0]
+    step = max(1, int(slab_depth * (1 - overlap)))
+
+    text_emb = None
+    text_emb_np = get_organ_embedding(organ_name)
+    if text_emb_np is not None:
+        text_emb = text_emb_np[None]
+
+    # Determine slab range
+    if bbox is not None:
+        d_min_range = max(0, bbox[0] - slab_depth)
+        d_max_range = min(D, bbox[3] + slab_depth)
+    elif point_dhw is not None:
+        d_min_range = max(0, point_dhw[0] - slab_depth * 2)
+        d_max_range = min(D, point_dhw[0] + slab_depth * 2)
+    else:
+        d_min_range, d_max_range = 0, D
+
+    # Gaussian weighting along depth
+    gauss_1d = np.zeros(slab_depth, dtype=np.float32)
+    gauss_1d[slab_depth // 2] = 1.0
+    gauss_1d = gaussian_filter(gauss_1d, sigma=slab_depth / 6)
+    gauss_1d = gauss_1d / gauss_1d.max()
+    gauss_weight = gauss_1d[:, None, None]
+
+    logit_acc = np.zeros((D, H, W), dtype=np.float32)
+    count_acc = np.zeros((D, H, W), dtype=np.float32)
+    n_slabs = 0
+
+    for d_start in range(d_min_range, max(d_min_range + 1, d_max_range - slab_depth + 1), step):
+        d_end = min(d_start + slab_depth, D)
+        if d_end - d_start < slab_depth:
+            d_start = max(0, d_end - slab_depth)
+
+        slab = vol_norm[d_start:d_end, :, :]
+        scale = np.array(spatial_size) / np.array(slab.shape)
+        slab_resized = zoom(slab, scale, order=1)
+        batch = mx.array(slab_resized[None, :, :, :, None])
+
+        # Build prompts for this slab
+        kwargs = {"multimask_output": False}
+        if text_emb is not None:
+            kwargs["text_embedding"] = text_emb
+
+        if point_dhw is not None and d_start <= point_dhw[0] < d_end:
+            local_pt = (np.array(point_dhw) - np.array([d_start, 0, 0])) * scale
+            kwargs["points"] = (
+                mx.array(local_pt[None, None, :].astype(np.float32)),
+                mx.array([[1.0]]),
+            )
+
+        if bbox is not None:
+            local_box = np.array([
+                max(0, (bbox[0] - d_start)) * scale[0],
+                bbox[1] * scale[1],
+                bbox[2] * scale[2],
+                min(slab_depth - 1, (bbox[3] - d_start)) * scale[0],
+                bbox[4] * scale[1],
+                bbox[5] * scale[2],
+            ], dtype=np.float32)
+            kwargs["boxes"] = mx.array(local_box[None])
+
+        masks, _ = model(batch, **kwargs)
+        mx.eval(masks)
+        logits = np.array(masks)[0, 0]
+
+        actual_depth = d_end - d_start
+        logits_full = zoom(logits, np.array((actual_depth, H, W)) / np.array(logits.shape), order=1)
+
+        gw = gauss_weight[:actual_depth]
+        logit_acc[d_start:d_end] += logits_full * gw
+        count_acc[d_start:d_end] += gw
+        n_slabs += 1
+
+    logit_acc /= np.maximum(count_acc, 1e-8)
+
+    if verbose:
+        pos = (logit_acc > 0).sum()
+        print(f"  {n_slabs} slabs, {pos} positive voxels")
+
+    return (logit_acc > 0).astype(np.uint8)
+
+
 def segment_organ(
     model,
     volume: np.ndarray,
