@@ -1,0 +1,36 @@
+[project]
+name = "segvol-mlx"
+version = "0.1.0"
+description = "SegVol on Apple Silicon via MLX — text-prompted 3D medical image segmentation"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "mlx>=0.31",
+    "numpy",
+    "nibabel",
+    "scipy",
+    "safetensors",
+    "huggingface-hub",
+    "tokenizers",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "torch", "monai"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/segvol_mlx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "torch>=2.11.0",
+    "pytest>=9.0.0",
+    "monai>=1.4.0",
+]
