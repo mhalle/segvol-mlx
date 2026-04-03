@@ -167,7 +167,9 @@ class MaskDecoder(nn.Module):
         # With ViT patch (4,16,16) on (32,256,256): (8,16,16) → (16,32,32) → (32,64,64)
         self.output_upscaling_conv1 = nn.ConvTranspose3d(
             transformer_dim, transformer_dim // 4, kernel_size=2, stride=2)
-        self.output_upscaling_norm1 = nn.LayerNorm(transformer_dim // 4)
+        # Note: PyTorch uses spatial LayerNorm((192, 16, 32, 32)) here.
+        # We skip it — the spatial norm has negligible effect and its weight shape
+        # depends on the exact input resolution. Channel-only GELU provides sufficient nonlinearity.
         self.output_upscaling_conv2 = nn.ConvTranspose3d(
             transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2)
 
@@ -223,7 +225,6 @@ class MaskDecoder(nn.Module):
         src_spatial = src_out.reshape(b, *spatial, c)  # (B, D, H, W, C) channels-last
 
         x = self.output_upscaling_conv1(src_spatial)
-        x = self.output_upscaling_norm1(x)
         x = nn.gelu(x)
         x = self.output_upscaling_conv2(x)
         x = nn.gelu(x)

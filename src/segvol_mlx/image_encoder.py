@@ -67,7 +67,7 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
-        self.qkv = nn.Linear(dim, dim * 3)
+        self.qkv = nn.Linear(dim, dim * 3, bias=False)
         self.out_proj = nn.Linear(dim, dim)
 
     def __call__(self, x: mx.array) -> mx.array:
@@ -121,6 +121,9 @@ class ViTEncoder(nn.Module):
             for _ in range(depth)
         ]
 
+        # Final norm (MONAI ViT has this)
+        self.norm = nn.LayerNorm(embed_dim)
+
     def __call__(self, x: mx.array) -> mx.array:
         """
         Args:
@@ -134,4 +137,5 @@ class ViTEncoder(nn.Module):
         for blk in self.blocks:
             x = blk(x)
 
+        x = self.norm(x)
         return x
