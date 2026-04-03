@@ -97,23 +97,32 @@ class SegVol(nn.Module):
     ) -> mx.array:
         """Segment an organ using a text prompt.
 
+        Uses precomputed embeddings for known organs (no CLIP needed).
+        Falls back to CLIP tokenizer for novel text.
+
         Args:
             image: (B, D, H, W, 1) preprocessed CT, channels-last
             organ_name: e.g. "liver", "spleen", "left lung upper lobe"
-            tokenizer: CLIP tokenizer (load via text_encoder.load_tokenizer())
+            tokenizer: CLIP tokenizer (only needed for organs not in precomputed set)
 
         Returns:
             mask: (B, 1, D', H', W') segmentation logits (threshold at 0)
         """
-        from .text_encoder import SEGVOL_TEXT_TEMPLATE, tokenize_text
+        from .text_encoder import get_organ_embedding
 
-        if tokenizer is None:
-            from .text_encoder import load_tokenizer
-            tokenizer = load_tokenizer()
-
-        text = SEGVOL_TEXT_TEMPLATE.format(organ_name)
-        input_ids = tokenize_text(tokenizer, text)
-        text_emb = self.text_encoder(input_ids)
+        # Try precomputed embedding first (instant, no CLIP needed)
+        emb = get_organ_embedding(organ_name)
+        if emb is not None:
+            text_emb = emb[None]  # (1, 768)
+        else:
+            # Fall back to CLIP
+            from .text_encoder import SEGVOL_TEXT_TEMPLATE, tokenize_text
+            if tokenizer is None:
+                from .text_encoder import load_tokenizer
+                tokenizer = load_tokenizer()
+            text = SEGVOL_TEXT_TEMPLATE.format(organ_name)
+            input_ids = tokenize_text(tokenizer, text)
+            text_emb = self.text_encoder(input_ids)
 
         masks, _ = self(image, text_embedding=text_emb, multimask_output=False)
         return masks

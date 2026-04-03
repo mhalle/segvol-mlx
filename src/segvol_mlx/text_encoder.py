@@ -136,6 +136,38 @@ def tokenize_text(tokenizer, text: str) -> mx.array:
     return mx.array([encoded.ids])
 
 
+def get_organ_embedding(organ_name: str) -> Optional[mx.array]:
+    """Get precomputed text embedding for a known organ.
+
+    Returns (768,) embedding or None if organ not found.
+    No CLIP model needed — embeddings are precomputed and shipped with the package.
+    """
+    import os
+    emb_path = os.path.join(os.path.dirname(__file__), "organ_embeddings.npz")
+    if not os.path.exists(emb_path):
+        return None
+
+    data = np.load(emb_path)
+    # Try exact match first
+    if organ_name in data:
+        return mx.array(data[organ_name])
+    # Try case-insensitive partial match
+    name_lower = organ_name.lower()
+    for key in data.files:
+        if name_lower in key.lower() or key.lower() in name_lower:
+            return mx.array(data[key])
+    return None
+
+
+def list_organs() -> List[str]:
+    """List all organs with precomputed embeddings."""
+    import os
+    emb_path = os.path.join(os.path.dirname(__file__), "organ_embeddings.npz")
+    if not os.path.exists(emb_path):
+        return []
+    return list(np.load(emb_path).files)
+
+
 SEGVOL_TEXT_TEMPLATE = "A computerized tomography of a {}."
 
 # These organ names match SegVol's training data
