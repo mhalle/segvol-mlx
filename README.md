@@ -83,12 +83,13 @@ Single 32×256×256 slab, no sliding window or zoom-in-zoom-out:
 
 | Organ | Point only | Text + box | Time |
 |---|---|---|---|
-| Left lung upper lobe | 0.86 | **0.94** | 0.43s |
-| Spleen | 0.68 | — | 0.43s |
-| Right lung upper lobe | 0.65 | — | 0.43s |
-| Liver | 0.41 | — | 0.43s |
+| Left lung upper lobe | 0.88 | **0.95** | 0.43s |
+| Stomach | 0.77 | **0.82** | 0.43s |
+| Right lung upper lobe | 0.66 | **0.79** | 0.43s |
+| Spleen | 0.66 | — | 0.43s |
+| Liver | 0.19 | 0.31 | 0.43s |
 
-Text + box prompts produce the best results (0.94 Dice on lung). Zoom-in-zoom-out inference (not yet implemented) would improve all numbers further.
+Text + box prompts produce the best results (0.95 Dice on lung, 0.82 on stomach).
 
 ## Architecture
 
