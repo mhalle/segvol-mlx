@@ -11,8 +11,10 @@ dependencies = [
     "nibabel",
     "scipy",
     "safetensors",
-    "huggingface-hub",
+    "huggingface-hub[cli]",
     "tokenizers",
+    "mlx-lm>=0.31.1",
+    "mlx-vlm>=0.4.3",
 ]
 
 [project.optional-dependencies]
