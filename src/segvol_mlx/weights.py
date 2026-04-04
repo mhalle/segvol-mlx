@@ -122,18 +122,15 @@ def load_segvol(checkpoint_path: str, dtype: str = "float32"):
                 arr = arr.transpose(1, 2, 3, 4, 0)
             else:
                 arr = arr.transpose(0, 2, 3, 4, 1)
+        # Spatial LayerNorm affine weights: (C, D, H, W) -> (D, H, W, C)
+        elif "output_upscaling_norm1" in mlx_key and arr.ndim == 4:
+            arr = arr.transpose(1, 2, 3, 0)
         # Conv2d 4D weights (mask_downscaling)
         elif arr.ndim == 4:
             arr = arr.transpose(0, 2, 3, 1)  # NCHW -> NHWC
 
         # Skip mask_downscaling (Conv2d — not implemented, not needed for text/point/box prompts)
         if "mask_downscaling" in mlx_key:
-            skipped.append(mlx_key)
-            continue
-
-        # Skip spatial LayerNorm in output_upscaling (shape mismatch: 4D vs 1D)
-        # Our model uses channel-only LayerNorm; the spatial norm is a minor correction
-        if "output_upscaling_norm1" in mlx_key and arr.ndim > 1:
             skipped.append(mlx_key)
             continue
 

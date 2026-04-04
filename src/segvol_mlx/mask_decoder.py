@@ -10,6 +10,29 @@ import mlx.nn as nn
 import numpy as np
 
 
+class SpatialLayerNorm3D(nn.Module):
+    """LayerNorm over (D, H, W, C) for channels-last 3D features."""
+
+    def __init__(self, spatial_shape: Tuple[int, int, int], channels: int,
+                 eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = mx.ones((*spatial_shape, channels))
+        self.bias = mx.zeros((*spatial_shape, channels))
+
+    def __call__(self, x: mx.array) -> mx.array:
+        in_dtype = x.dtype
+        if in_dtype == mx.float16:
+            x = x.astype(mx.float32)
+        mean = mx.mean(x, axis=(-4, -3, -2, -1), keepdims=True)
+        var = mx.var(x, axis=(-4, -3, -2, -1), keepdims=True)
+        x = (x - mean) / mx.sqrt(var + self.eps)
+        x = x * self.weight[None] + self.bias[None]
+        if in_dtype == mx.float16:
+            x = x.astype(mx.float16)
+        return x
+
+
 class MLP(nn.Module):
     """Multi-layer perceptron with ReLU (except last layer)."""
 
@@ -165,11 +188,11 @@ class MaskDecoder(nn.Module):
 
         # Output upscaling: (D/p, H/p, W/p) → 2× → 2× = (D/p*4, H/p*4, W/p*4)
         # With ViT patch (4,16,16) on (32,256,256): (8,16,16) → (16,32,32) → (32,64,64)
+        up1_spatial = tuple((s // p) * 2 for s, p in zip(image_size, patch_size))
         self.output_upscaling_conv1 = nn.ConvTranspose3d(
             transformer_dim, transformer_dim // 4, kernel_size=2, stride=2)
-        # Note: PyTorch uses spatial LayerNorm((192, 16, 32, 32)) here.
-        # We skip it — the spatial norm has negligible effect and its weight shape
-        # depends on the exact input resolution. Channel-only GELU provides sufficient nonlinearity.
+        self.output_upscaling_norm1 = SpatialLayerNorm3D(
+            spatial_shape=up1_spatial, channels=transformer_dim // 4)
         self.output_upscaling_conv2 = nn.ConvTranspose3d(
             transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2)
 
@@ -225,6 +248,7 @@ class MaskDecoder(nn.Module):
         src_spatial = src_out.reshape(b, *spatial, c)  # (B, D, H, W, C) channels-last
 
         x = self.output_upscaling_conv1(src_spatial)
+        x = self.output_upscaling_norm1(x)
         x = nn.gelu(x)
         x = self.output_upscaling_conv2(x)
         x = nn.gelu(x)
