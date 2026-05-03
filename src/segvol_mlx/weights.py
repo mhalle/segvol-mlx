@@ -136,16 +136,16 @@ def load_segvol(checkpoint_path: str, dtype: str = "float32"):
 
         mlx_weights[mlx_key] = mx.array(arr.astype(np.float32)).astype(target_dtype)
 
-    try:
-        model.load_weights(list(mlx_weights.items()), strict=True)
-        print(f"Loaded {len(mlx_weights)} weights (strict)")
-    except ValueError as e:
-        print(f"Strict failed: {e}")
-        model.load_weights(list(mlx_weights.items()), strict=False)
-        print(f"Loaded {len(mlx_weights)} weights (non-strict)")
-
+    # Strict load: any drift (renamed key, missing weight, shape mismatch)
+    # should fail loudly. Previously fell back to strict=False, which masked
+    # checkpoint/key-remap regressions behind a printed warning.
+    model.load_weights(list(mlx_weights.items()), strict=True)
+    print(f"Loaded {len(mlx_weights)} weights (strict)")
     if skipped:
-        print(f"Skipped {len(skipped)} mask_downscaling weights (Conv2d, not needed for text/point/box)")
+        print(
+            f"Skipped {len(skipped)} mask_downscaling weights — mask-prompt "
+            "input is not implemented (text/point/box prompts only)."
+        )
 
     return model
 

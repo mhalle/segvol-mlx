@@ -65,9 +65,12 @@ class SegVol(nn.Module):
             multimask_output: return 3 masks or 1
 
         Returns:
-            masks: (B, num_masks, D', H', W') segmentation logits
+            masks: (B, num_masks, D, H, W) segmentation logits at input resolution
             iou_pred: (B, num_masks) quality predictions
         """
+        # Capture input spatial shape for output upsampling (matches upstream API).
+        img_shape = (image.shape[1], image.shape[2], image.shape[3])
+
         # Encode image
         image_embedding = self.encode_image(image)
 
@@ -81,13 +84,34 @@ class SegVol(nn.Module):
 
         dense_pe = self.prompt_encoder.get_dense_pe()
 
-        # Decode masks
+        # Decode masks (low-res)
         masks, iou_pred = self.mask_decoder(
             image_embedding, dense_pe, sparse, dense,
             multimask_output=multimask_output,
             text_embedding=text_embedding)
 
+        # Trilinear upsample to input resolution (matches upstream
+        # SegVol.forward_decoder which does F.interpolate(..., mode='trilinear',
+        # align_corners=False)). MLX's nn.Upsample mode='linear' is the
+        # multidimensional linear interp path equivalent to PyTorch's trilinear.
+        masks = self._upsample_to_input(masks, img_shape)
+
         return masks, iou_pred
+
+    @staticmethod
+    def _upsample_to_input(masks: mx.array,
+                           img_shape: Tuple[int, int, int]) -> mx.array:
+        """Upsample (B, M, D', H', W') channels-first masks to img_shape."""
+        target_d, target_h, target_w = img_shape
+        low_d, low_h, low_w = masks.shape[2], masks.shape[3], masks.shape[4]
+        if (low_d, low_h, low_w) == (target_d, target_h, target_w):
+            return masks
+        # MLX nn.Upsample expects channels-last
+        x = masks.transpose(0, 2, 3, 4, 1)  # (B, D', H', W', M)
+        scale = (target_d / low_d, target_h / low_h, target_w / low_w)
+        up = nn.Upsample(scale_factor=scale, mode="linear", align_corners=False)
+        x = up(x)
+        return x.transpose(0, 4, 1, 2, 3)  # back to channels-first
 
     def segment_by_text(
         self,

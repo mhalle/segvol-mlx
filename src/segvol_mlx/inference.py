@@ -7,28 +7,70 @@ import numpy as np
 from scipy.ndimage import zoom
 
 
+def foreground_normalize(volume: np.ndarray) -> np.ndarray:
+    """Z-score normalize using foreground voxels (matches upstream).
+
+    Mirrors SegVol/data_process/demo_data_process.py:ForegroundNormalization:
+    treat voxels above the global mean as foreground; clip the volume to the
+    [0.05%, 99.95%] foreground range; subtract foreground mean and divide by
+    foreground std. Without this, the input distribution diverges from
+    training and Dice drops.
+    """
+    flat = volume.reshape(-1)
+    thred = float(flat.mean())
+    foreground = flat[flat > thred]
+    if foreground.size == 0:
+        return volume.astype(np.float32, copy=True)
+    upper = float(np.percentile(foreground, 99.95))
+    lower = float(np.percentile(foreground, 0.05))
+    mean = float(foreground.mean())
+    std = float(foreground.std())
+    out = np.clip(volume, lower, upper).astype(np.float32)
+    out = (out - mean) / max(std, 1e-8)
+    return out
+
+
+def minmax_normalize(volume: np.ndarray) -> np.ndarray:
+    """MinMax to [0, 1] (matches upstream MinMaxNormalization)."""
+    out = volume.astype(np.float32) - float(volume.min())
+    return out / max(float(out.max()), 1e-8)
+
+
+def normalize_ct(volume: np.ndarray, foreground: bool = True) -> np.ndarray:
+    """Full SegVol intensity normalization: ForegroundNormalize → MinMax.
+
+    Set foreground=False to skip the z-score step (matches the simpler legacy
+    MLX behavior — useful only for inputs already pre-normalized upstream).
+    """
+    out = foreground_normalize(volume) if foreground else volume.astype(np.float32)
+    return minmax_normalize(out)
+
+
 def preprocess_ct(
     volume: np.ndarray,
     target_size: Tuple[int, int, int] = (32, 256, 256),
+    foreground: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Preprocess a CT volume for SegVol.
 
     Args:
-        volume: Raw CT array (D, H, W)
-        target_size: Resize to this size
+        volume: Raw CT array (D, H, W) in HU.
+        target_size: Resize to this size.
+        foreground: Apply ForegroundNormalization before MinMax (matches the
+            upstream training pipeline). Disable only if the caller has
+            already done the equivalent normalization.
 
     Returns:
-        resized: MinMax-normalized, resized to target_size
-        scale: Scale factors used (for mapping coordinates back)
-    """
-    # MinMax normalize
-    v_min, v_max = volume.min(), volume.max()
-    vol_norm = (volume.astype(np.float32) - v_min) / (v_max - v_min + 1e-8)
+        resized: Normalized, resized to target_size.
+        scale: Scale factors used (for mapping coordinates back).
 
-    # Resize to target
+    Note: this does *not* apply the upstream Orientationd (axis flip to RAS),
+    DimTranspose, SpatialPadd, or CropForegroundd steps. Callers are
+    responsible for orientation; the resize handles size matching.
+    """
+    vol_norm = normalize_ct(volume, foreground=foreground)
     scale = np.array(target_size) / np.array(vol_norm.shape)
     resized = zoom(vol_norm, scale, order=1)
-
     return resized, scale
 
 
@@ -99,8 +141,7 @@ def segment_at_point(
     from .text_encoder import get_organ_embedding
 
     D, H, W = volume.shape
-    v_min, v_max = volume.min(), volume.max()
-    vol_norm = (volume.astype(np.float32) - v_min) / (v_max - v_min + 1e-8)
+    vol_norm = normalize_ct(volume)
 
     slab_depth = spatial_size[0]
     d_start = max(0, point_dhw[0] - slab_depth // 2)
@@ -188,8 +229,7 @@ def segment_slab(
         slab_range: (d_start, d_end) indices into original volume
     """
     D, H, W = volume.shape
-    v_min, v_max = volume.min(), volume.max()
-    vol_norm = (volume.astype(np.float32) - v_min) / (v_max - v_min + 1e-8)
+    vol_norm = normalize_ct(volume)
 
     if center_slice is None:
         center_slice = D // 2
@@ -250,8 +290,7 @@ def sliding_window_segment(
     from scipy.ndimage import gaussian_filter
 
     D, H, W = volume.shape
-    v_min, v_max = volume.min(), volume.max()
-    vol_norm = (volume.astype(np.float32) - v_min) / (v_max - v_min + 1e-8)
+    vol_norm = normalize_ct(volume)
 
     slab_depth = spatial_size[0]
     step = max(1, int(slab_depth * (1 - overlap)))

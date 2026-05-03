@@ -2,6 +2,14 @@
 
 Minimal CLIP text model (12-layer transformer, 512 dim) with dim_align projection.
 Supports precomputed embeddings for known organ classes.
+
+Activation: this implementation uses gelu (mx.nn.gelu_approx, ≈ tanh-based
+"gelu_new"), which matches the SegVol training recipe and the precomputed
+organ embeddings shipped with this package. Modern Hugging Face Transformers
+(>=4.x) default the CLIP text MLP to "quick_gelu" instead — building a
+PyTorch reference from a freshly-instantiated CLIPTextConfig() will diverge
+from us numerically. To compare against PyTorch, set
+config.hidden_act = "gelu_new" before instantiating CLIPTextModel.
 """
 
 from typing import Optional, List

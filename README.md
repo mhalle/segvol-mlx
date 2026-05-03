@@ -11,11 +11,14 @@ SegVol is the first volumetric medical segmentation model that accepts **text pr
 | Component | Status |
 |---|---|
 | ViT encoder (12 layers, 768 dim) | Working, weights loaded |
-| CLIP text encoder (native MLX) | Working |
-| SAM-style mask decoder + text alignment | Working |
+| CLIP text encoder (native MLX, gelu_new) | Working |
+| SAM-style mask decoder + text alignment | Working, equivalence-tested vs PyTorch |
 | Prompt encoder (point, box, text) | Working |
-| 462/462 weights loaded (strict) | Clean |
+| Mask-prompt input | **Not supported** (mask_downscaling weights skipped) |
+| 464/464 transferable weights loaded (strict) | Clean (10 mask_downscaling tensors skipped) |
 | **Fits M2 16GB** | **Yes (~3GB)** |
+
+> **CLIP activation note:** the text encoder uses `gelu_new` (matches the SegVol training recipe and the precomputed organ embeddings shipped here). Modern Hugging Face `CLIPTextConfig()` defaults to `quick_gelu`; if you build a PyTorch reference, set `config.hidden_act = "gelu_new"` before instantiating, or your reference will diverge from this port.
 
 ## Quick start
 
